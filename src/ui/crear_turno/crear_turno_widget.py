@@ -1675,6 +1675,14 @@ class CrearTurnoWidget(QWidget):
             self.turno_actual.nombre = self.nombre_custom_edit.text().strip() or self._generar_nombre_turno()
             self.turno_actual.vigencia = "A" if self.btn_activo.isChecked() else "I"
             
+            # Asegurar que el ID del turno sea el correcto
+            id_turno_str = self.id_turno_label.text()
+            try:
+                id_turno = int(id_turno_str)
+                self.turno_actual.id_turno = id_turno
+            except ValueError:
+                print(f"Error al convertir ID de turno: {id_turno_str}")
+            
             print(f"Turno a guardar: ID={self.turno_actual.id_turno}, Nombre={self.turno_actual.nombre}, Vigencia={self.turno_actual.vigencia}")
             
             # Convertir los detalles del formato de diccionario al modelo TurnoDetalleDiario
@@ -1754,9 +1762,26 @@ class CrearTurnoWidget(QWidget):
             print("Guardando turno en la base de datos")
             self.turno_dao.guardar_turno(self.turno_actual)
             
-            # Guardar turno en la lista de creados
-            if self.turno_actual not in self.turnos_creados:
-                self.turnos_creados.append(self.turno_actual)
+            # Crear una copia del turno actual para guardar en la lista de turnos creados
+            turno_copia = Turno()
+            turno_copia.id_turno = self.turno_actual.id_turno
+            turno_copia.nombre = self.turno_actual.nombre
+            turno_copia.vigencia = self.turno_actual.vigencia
+            turno_copia.frecuencia = self.turno_actual.frecuencia
+            
+            # Copiar los detalles
+            for detalle_original in self.turno_actual.detalles:
+                detalle_copia = TurnoDetalleDiario(
+                    id_turno_detalle_diario=detalle_original.id_turno_detalle_diario,
+                    id_turno=turno_copia.id_turno,
+                    jornada=detalle_original.jornada,
+                    hora_ingreso=detalle_original.hora_ingreso,
+                    duracion=detalle_original.duracion
+                )
+                turno_copia.detalles.append(detalle_copia)
+            
+            # Guardar la copia en la lista de turnos creados
+            self.turnos_creados.append(turno_copia)
             
             # Preguntar si se desea agregar un nuevo turno
             respuesta = QMessageBox.question(
@@ -2032,6 +2057,14 @@ class CrearTurnoWidget(QWidget):
             
             # Obtener el próximo ID desde la base de datos
             id_turno = self.turno_dao.obtener_ultimo_id_turno()
+            
+            # Si ya tenemos turnos creados, incrementar el ID manualmente
+            if self.turnos_creados:
+                # Encontrar el ID más alto entre los turnos creados
+                max_id = max(turno.id_turno for turno in self.turnos_creados)
+                # Usar el mayor entre el ID de la base de datos y el máximo de los turnos creados + 1
+                id_turno = max(id_turno, max_id + 1)
+            
             print(f"Último ID de turno obtenido de la base de datos: {id_turno}")
             
             # Asignar el ID al turno actual

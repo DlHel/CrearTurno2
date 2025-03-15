@@ -350,9 +350,10 @@ class TurnoDAO:
             ConsultaError: Si hay un error al obtener los IDs
         """
         try:
-            # Siempre obtener un nuevo ID para el turno
-            nuevo_id_turno = self.obtener_ultimo_id_turno()
-            turno.id_turno = nuevo_id_turno
+            # Solo asignar un nuevo ID si el turno no tiene uno válido
+            if turno.id_turno <= 0:
+                nuevo_id_turno = self.obtener_ultimo_id_turno()
+                turno.id_turno = nuevo_id_turno
             
             # Obtener ID para el primer detalle
             id_detalle = self.obtener_ultimo_id_detalle()
