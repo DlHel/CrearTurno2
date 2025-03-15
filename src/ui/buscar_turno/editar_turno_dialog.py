@@ -33,6 +33,9 @@ class EditarTurnoDialog(QDialog):
         self.detalles_eliminados = []
         self.detalles_modificados = []
         self.detalles_nuevos = []
+        
+        # Variable para controlar cambios en la vigencia
+        self.vigencia_cambiada = False
 
         # Variables para el DAO
         self.turno_dao = TurnoDAO()
@@ -1046,4 +1049,17 @@ class EditarTurnoDialog(QDialog):
                 "Error al generar SQL",
                 f"Ocurrió un error al generar el script SQL: {str(e)}"
             )
-            return None 
+            return None
+
+    def cargar_datos_turno(self):
+        """Carga los datos del turno en la interfaz de usuario."""
+        # Actualizar etiquetas con información del turno
+        self.id_label.setText(f"ID: {self.turno_editable.id_turno}")
+        self.nombre_label.setText(f"Nombre: {self.turno_editable.nombre}")
+        self.horas_label.setText(f"Horas semanales: {self.turno_editable._total_horas_semanales:.1f}")
+        
+        # Actualizar título del diálogo
+        self.setWindowTitle(f"Editar Turno: {self.turno_editable.nombre}")
+        
+        # Cargar detalles en la tabla
+        self.actualizar_tabla_detalles() 
