@@ -676,7 +676,7 @@ class TurnoDAO:
                 script.append(f"""
 UPDATE ASISTENCIAS.TURNO
 SET NOMBRE = '{turno.nombre}',
-    VIGENCIA = '{turno.vigencia}',
+    VIGENCIA = {turno.vigencia},
     FRECUENCIA = '{turno.frecuencia}'
 WHERE ID_TURNO = {turno.id_turno};
 """)
@@ -685,7 +685,7 @@ WHERE ID_TURNO = {turno.id_turno};
                 script.append(f"-- Inserción de un nuevo turno con ID {turno.id_turno}")
                 script.append(f"""
 INSERT INTO ASISTENCIAS.TURNO (ID_TURNO, NOMBRE, VIGENCIA, FRECUENCIA)
-VALUES ({turno.id_turno}, '{turno.nombre}', '{turno.vigencia}', '{turno.frecuencia}');
+VALUES ({turno.id_turno}, '{turno.nombre}', {turno.vigencia}, '{turno.frecuencia}');
 """)
             
             # Verificar si existen detalles para este turno
