@@ -1681,7 +1681,7 @@ class CrearTurnoWidget(QWidget):
             print("Iniciando guardado de turno")
             # Actualizar datos del turno
             self.turno_actual.nombre = self.nombre_custom_edit.text().strip() or self._generar_nombre_turno()
-            self.turno_actual.vigencia = "A" if self.btn_activo.isChecked() else "I"
+            self.turno_actual.vigencia = 1 if self.btn_activo.isChecked() else 0
             
             # Asegurar que el ID del turno sea el correcto
             id_turno_str = self.id_turno_label.text()
@@ -1960,7 +1960,7 @@ class CrearTurnoWidget(QWidget):
                     # Fallback al método anterior si el de TurnoDAO falla
                     script += f"-- ======== TURNO {i+1}: {turno.nombre} ========\n"
                     # INSERT para la tabla TURNO
-                    script += f"INSERT INTO ASISTENCIAS.TURNO (ID_TURNO, NOMBRE, VIGENCIA, FRECUENCIA) VALUES ({turno.id_turno},'{turno.nombre}', '{turno.vigencia}', 'Diarios');\n"
+                    script += f"INSERT INTO ASISTENCIAS.TURNO (ID_TURNO, NOMBRE, VIGENCIA, FRECUENCIA) VALUES ({turno.id_turno},'{turno.nombre}', {turno.vigencia}, 'Diarios');\n"
                     
                     # INSERTs para los detalles
                     for detalle in turno.detalles:
