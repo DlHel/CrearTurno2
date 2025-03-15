@@ -86,7 +86,13 @@ class EditarTurnoDialog(QDialog):
         self.vigencia_spin = QSpinBox()
         self.vigencia_spin.setMinimum(0)
         self.vigencia_spin.setMaximum(1)
-        self.vigencia_spin.setValue(self.turno_editable.vigencia)
+        # Convertir vigencia a entero antes de asignarla al QSpinBox
+        try:
+            vigencia_valor = int(self.turno_editable.vigencia)
+        except (ValueError, TypeError):
+            # Si no se puede convertir a entero, usar 1 como valor predeterminado
+            vigencia_valor = 1
+        self.vigencia_spin.setValue(vigencia_valor)
         self.vigencia_spin.setToolTip("0 = Inactivo, 1 = Activo")
         self.vigencia_spin.setStyleSheet("""
             QSpinBox {
@@ -404,9 +410,15 @@ class EditarTurnoDialog(QDialog):
         """Actualiza la vigencia del turno."""
         self.turno_editable.vigencia = self.vigencia_spin.value()
 
+        # Convertir la vigencia original a entero para comparar
+        try:
+            vigencia_original = int(self.turno_original.vigencia)
+        except (ValueError, TypeError):
+            vigencia_original = 1
+
         # Registrar el cambio si es diferente al original
-        if self.turno_editable.vigencia != self.turno_original.vigencia:
-            # Marcar que hay cambio en la vigencia
+        if self.turno_editable.vigencia != vigencia_original:
+            # Marcar que hay cambios en la vigencia
             self.vigencia_cambiada = True
         else:
             self.vigencia_cambiada = False
@@ -892,8 +904,16 @@ class EditarTurnoDialog(QDialog):
     def _hay_cambios(self):
         """Verifica si se han realizado cambios en el turno."""
         # Cambios en datos básicos
-        if (self.turno_editable.nombre != self.turno_original.nombre or
-                self.turno_editable.vigencia != self.turno_original.vigencia):
+        if self.turno_editable.nombre != self.turno_original.nombre:
+            return True
+            
+        # Comparar vigencia (convertir a entero para comparar)
+        try:
+            vigencia_original = int(self.turno_original.vigencia)
+        except (ValueError, TypeError):
+            vigencia_original = 1
+            
+        if self.turno_editable.vigencia != vigencia_original:
             return True
 
         # Cambios en detalles
@@ -929,7 +949,13 @@ class EditarTurnoDialog(QDialog):
         clon = Turno()
         clon.id_turno = turno.id_turno
         clon.nombre = turno.nombre
-        clon.vigencia = turno.vigencia
+        
+        # Convertir vigencia a entero
+        try:
+            clon.vigencia = int(turno.vigencia)
+        except (ValueError, TypeError):
+            clon.vigencia = 1
+            
         clon.frecuencia = turno.frecuencia
 
         for detalle in turno.detalles:
