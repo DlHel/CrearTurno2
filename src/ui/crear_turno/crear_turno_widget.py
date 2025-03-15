@@ -1297,18 +1297,26 @@ class CrearTurnoWidget(QWidget):
             # Obtener el último ID de detalle para asignar IDs temporales
             try:
                 ultimo_id_detalle = self.turno_dao.obtener_ultimo_id_detalle()
-                print(f"Último ID de detalle obtenido: {ultimo_id_detalle}")
-                # Contar cuántos detalles nuevos vamos a agregar para reservar IDs
-                dias_nuevos = [dia for dia in detalle_actual["dias"] if not any(d["dia"] == dia for d in self.detalles)]
-                id_actual = ultimo_id_detalle
+                print(f"Último ID de detalle obtenido de la BD: {ultimo_id_detalle}")
+                
+                # Encontrar el ID más alto entre los detalles existentes
+                max_id_existente = 0
+                for detalle in self.detalles:
+                    if detalle.get("id", 0) > max_id_existente:
+                        max_id_existente = detalle.get("id", 0)
+                
+                # Usar el mayor entre el ID de la BD y el máximo existente
+                id_actual = max(ultimo_id_detalle, max_id_existente + 1)
+                print(f"ID inicial para nuevos detalles: {id_actual}")
+                
             except Exception as e:
                 print(f"Error al obtener último ID de detalle: {str(e)}")
-                # Si hay error, usar un ID temporal negativo
-                id_actual = -1
+                # Si hay error, usar un ID temporal basado en el máximo existente
+                id_actual = 1
                 for detalle in self.detalles:
-                    if detalle.get("id", 0) < id_actual:
-                        id_actual = detalle.get("id", 0)
-                id_actual -= 1  # Usar un ID negativo menor que todos los existentes
+                    if detalle.get("id", 0) >= id_actual:
+                        id_actual = detalle.get("id", 0) + 1
+                print(f"ID inicial para nuevos detalles (fallback): {id_actual}")
             
             # Procesar cada día seleccionado
             for dia in detalle_actual["dias"]:
@@ -1350,11 +1358,11 @@ class CrearTurnoWidget(QWidget):
                         self.detalles[indice_existente] = nuevo_detalle
                         print(f"Detalle actualizado: {nuevo_detalle}")
                     elif not existe_detalle:
-                        # Asignar un ID temporal al nuevo detalle
+                        # Asignar un ID único al nuevo detalle
                         nuevo_detalle["id"] = id_actual
                         id_actual += 1
                         self.detalles.append(nuevo_detalle)
-                        print(f"Nuevo detalle agregado: {nuevo_detalle}")
+                        print(f"Nuevo detalle agregado: {nuevo_detalle} con ID {nuevo_detalle['id']}")
             
             # Actualizar la tabla de detalles
             self.actualizar_tabla_detalles()
@@ -1709,33 +1717,56 @@ class CrearTurnoWidget(QWidget):
                 print(f"Detalle creado: ID={detalle.id_turno_detalle_diario}, Día={detalle.jornada}, Hora={detalle.hora_ingreso}, Duración={detalle.duracion}")
                 self.turno_actual.detalles.append(detalle)
             
-            # Asignar IDs a los detalles del turno
+            # Verificar conexión a la base de datos
             try:
-                self.turno_dao.asignar_ids(self.turno_actual)
-                print(f"IDs asignados: Turno={self.turno_actual.id_turno}, Detalles={[d.id_turno_detalle_diario for d in self.turno_actual.detalles]}")
-                
-                # Actualizar los IDs en la lista de detalles para mostrarlos en la interfaz
-                for i, detalle in enumerate(self.turno_actual.detalles):
-                    if i < len(self.detalles):
-                        self.detalles[i]["id"] = detalle.id_turno_detalle_diario
-                
-                # Actualizar la tabla para mostrar los nuevos IDs
-                self.actualizar_tabla_detalles()
+                print("Verificando conexión a la base de datos...")
+                if not self.turno_dao.db.is_connected():
+                    print("No hay conexión activa, intentando conectar...")
+                    if not self.turno_dao.db.connect():
+                        print("ERROR: No se pudo establecer conexión a la base de datos")
+                        QMessageBox.critical(
+                            self,
+                            "Error de conexión",
+                            "No se pudo establecer conexión a la base de datos. No se puede verificar duplicados."
+                        )
+                        return
+                    print("Conexión establecida correctamente")
+                else:
+                    print("Conexión a la base de datos activa")
             except Exception as e:
-                print(f"Error al asignar IDs: {str(e)}")
-                # Continuar con el proceso a pesar del error
+                print(f"ERROR al verificar conexión: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                QMessageBox.critical(
+                    self,
+                    "Error de conexión",
+                    f"Error al verificar conexión a la base de datos: {str(e)}"
+                )
+                return
             
-            # Verificar duplicados
-            print("Buscando turnos similares...")
-            turnos_similares = self.turno_dao.buscar_turnos_similares(self.turno_actual)
+            # Verificar duplicados antes de asignar IDs
+            print("Buscando turnos exactamente iguales...")
+            turnos_similares = []
+            try:
+                turnos_similares = self.turno_dao.buscar_turnos_similares(self.turno_actual)
+                print(f"Búsqueda completada. Se encontraron {len(turnos_similares)} turnos similares")
+            except Exception as e:
+                print(f"ERROR al buscar turnos similares: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                QMessageBox.warning(
+                    self,
+                    "Error al buscar duplicados",
+                    f"No se pudieron buscar turnos duplicados: {str(e)}\n\nSe continuará con el proceso."
+                )
             
             if turnos_similares:
-                print(f"Se encontraron {len(turnos_similares)} turnos similares:")
+                print(f"Se encontraron {len(turnos_similares)} turnos exactamente iguales:")
                 for idx, (id_turno, nombre, detalles) in enumerate(turnos_similares):
-                    print(f"Turno similar #{idx+1}: ID={id_turno}, Nombre={nombre}")
+                    print(f"Turno exacto #{idx+1}: ID={id_turno}, Nombre={nombre}")
                     print(f"  Detalles: {len(detalles)} días")
                     for detalle in detalles:
-                        print(f"    {detalle['jornada']}: {detalle['hora_ingreso']} - Duración: {detalle['duracion']} min")
+                        print(f"    {detalle['jornada']}: {detalle['hora_ingreso']} - {detalle['hora_salida']}")
                 
                 # Determinar si hay coincidencia exacta por ID
                 coincidencia_exacta_id = any(id_turno == self.turno_actual.id_turno for id_turno, _, _ in turnos_similares)
@@ -1745,8 +1776,8 @@ class CrearTurnoWidget(QWidget):
                     titulo = "¡ATENCIÓN! Turno ya existe en la base de datos"
                     msg = f"El turno con ID {self.turno_actual.id_turno} ya existe en la base de datos:\n\n"
                 else:
-                    titulo = "Turnos Similares Encontrados"
-                    msg = f"Se encontraron {len(turnos_similares)} turnos similares o idénticos:\n\n"
+                    titulo = "Turnos Exactamente Iguales Encontrados"
+                    msg = f"Se encontraron {len(turnos_similares)} turnos exactamente iguales (mismos días, horas de entrada y salida):\n\n"
                 
                 for id_turno, nombre, detalles in turnos_similares[:3]:  # Mostrar solo los primeros 3
                     # Destacar si es coincidencia exacta por ID
@@ -1759,8 +1790,7 @@ class CrearTurnoWidget(QWidget):
                         jornada = detalle['jornada']
                         hora_ingreso = detalle['hora_ingreso'].strftime("%H:%M")
                         hora_salida = detalle['hora_salida'].strftime("%H:%M") if 'hora_salida' in detalle else "N/A"
-                        duracion = detalle['duracion']
-                        msg += f"  - {jornada}: {hora_ingreso} a {hora_salida} ({duracion} min)\n"
+                        msg += f"  - {jornada}: {hora_ingreso} a {hora_salida}\n"
                     msg += "\n"
                 
                 if len(turnos_similares) > 3:
@@ -1789,7 +1819,23 @@ class CrearTurnoWidget(QWidget):
                     print("Usuario canceló la operación debido a duplicidad")
                     return
             else:
-                print("No se encontraron turnos similares")
+                print("No se encontraron turnos exactamente iguales")
+            
+            # Asignar IDs a los detalles del turno
+            try:
+                self.turno_dao.asignar_ids(self.turno_actual)
+                print(f"IDs asignados: Turno={self.turno_actual.id_turno}, Detalles={[d.id_turno_detalle_diario for d in self.turno_actual.detalles]}")
+                
+                # Actualizar los IDs en la lista de detalles para mostrarlos en la interfaz
+                for i, detalle in enumerate(self.turno_actual.detalles):
+                    if i < len(self.detalles):
+                        self.detalles[i]["id"] = detalle.id_turno_detalle_diario
+                
+                # Actualizar la tabla para mostrar los nuevos IDs
+                self.actualizar_tabla_detalles()
+            except Exception as e:
+                print(f"Error al asignar IDs: {str(e)}")
+                # Continuar con el proceso a pesar del error
             
             # Guardar turno en la base de datos
             print("Guardando turno en la base de datos")
@@ -1844,13 +1890,13 @@ class CrearTurnoWidget(QWidget):
                 self.generar_script_sql()
             
         except Exception as e:
-            print(f"Error al guardar turno: {str(e)}")
+            print(f"ERROR GENERAL al guardar turno: {str(e)}")
             import traceback
             traceback.print_exc()
             QMessageBox.critical(
                 self,
-                "Error al guardar",
-                f"Ocurrió un error al guardar el turno: {str(e)}"
+                "Error al guardar turno",
+                f"Se produjo un error al guardar el turno: {str(e)}"
             )
 
     def generar_script_sql(self):
