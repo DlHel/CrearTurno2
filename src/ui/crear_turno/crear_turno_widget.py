@@ -1969,6 +1969,9 @@ class CrearTurnoWidget(QWidget):
                     
                     script += "\n"
         
+            # Agregar COMMIT al final del script
+            script += "COMMIT;\n"
+            
             # Mostrar diálogo con script SQL
             self.mostrar_dialogo_sql(script)
             

@@ -717,6 +717,8 @@ INSERT INTO ASISTENCIAS.TURNO_DETALLE_DIARIO (ID_TURNO_DETALLE_DIARIO, ID_TURNO,
 VALUES ({detalle.id_turno_detalle_diario}, {detalle.id_turno}, '{detalle.jornada}', TO_DATE('2025-01-01 {hora_ingreso_str}', 'YYYY-MM-DD HH24:MI:SS'), {detalle.duracion});
 """)
             
+            script.append("COMMIT;")
+            
             return "\n".join(script)
         except Exception as e:
             print(f"Error al generar script SQL: {str(e)}")
