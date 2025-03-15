@@ -8,8 +8,8 @@ from PyQt6.QtWidgets import QApplication, QMainWindow, QSplashScreen, QMessageBo
 from PyQt6.QtGui import QPixmap, QFont
 from PyQt6.QtCore import Qt, QTimer
 
-from src.ui.main_window import MainWindow
-from src.database.oracle_connection import OracleConnection
+from ui.main_window import MainWindow
+from database.oracle_connection import OracleConnection
 
 def main():
     """Función principal que inicia la aplicación."""

@@ -62,13 +62,33 @@ class Turno:
 
         # Ordenar días de la semana
         dias_semana = {
-            "Lunes": 1, "Martes": 2, "Miércoles": 3, 
-            "Jueves": 4, "Viernes": 5, "Sábado": 6, "Domingo": 7
+            "LUNES": 1, "MARTES": 2, "MIERCOLES": 3, "MIÉRCOLES": 3,
+            "JUEVES": 4, "VIERNES": 5, "SÁBADO": 6, "SABADO": 6, "DOMINGO": 7
         }
-        detalles_ordenados = sorted(
-            self.detalles,
-            key=lambda x: dias_semana[x.jornada]
-        )
+        
+        # Normalizar los nombres de los días a mayúsculas para la ordenación
+        detalles_ordenados = []
+        for detalle in self.detalles:
+            jornada_normalizada = detalle.jornada.upper()
+            # Asegurarse de que el día normalizado esté en el diccionario
+            if jornada_normalizada not in dias_semana:
+                # Si no está, intentar corregir acentos comunes
+                if jornada_normalizada == "MIÉRCOLES":
+                    jornada_normalizada = "MIERCOLES"
+                elif jornada_normalizada == "SÁBADO":
+                    jornada_normalizada = "SABADO"
+            
+            # Verificar que el día normalizado esté en el diccionario
+            if jornada_normalizada in dias_semana:
+                detalles_ordenados.append((detalle, dias_semana[jornada_normalizada]))
+            else:
+                # Si aún no está en el diccionario, usar el valor original
+                print(f"ADVERTENCIA: Día no reconocido: {detalle.jornada}")
+                detalles_ordenados.append((detalle, 99))  # Valor alto para ponerlo al final
+        
+        # Ordenar por el valor numérico del día
+        detalles_ordenados.sort(key=lambda x: x[1])
+        detalles_ordenados = [d[0] for d in detalles_ordenados]
 
         # Obtener abreviaturas de días
         dias = [d.jornada[:2] for d in detalles_ordenados]

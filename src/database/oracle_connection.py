@@ -60,20 +60,24 @@ class OracleConnection:
         """Establece la conexión con la base de datos Oracle."""
         try:
             if not self._is_connection_valid():
+                print("DEBUG: Conexión no válida, intentando conectar...")
                 # Limitar intentos de conexión
                 if self.connection_attempts >= self.max_connection_attempts:
-                    print("Máximo número de intentos de conexión alcanzado")
+                    print("DEBUG: Máximo número de intentos de conexión alcanzado")
                     return None
                     
                 self.connection_attempts += 1
+                print(f"DEBUG: Intento de conexión #{self.connection_attempts}")
                 
                 # Si había una conexión previa, intentar cerrarla primero
                 if self.connection:
                     try:
+                        print("DEBUG: Cerrando conexión previa...")
                         self.connection.close()
-                    except:
-                        pass  # Ignorar errores al cerrar
+                    except Exception as e:
+                        print(f"DEBUG: Error al cerrar conexión previa: {str(e)}")
                 
+                print(f"DEBUG: Conectando a {self.host}:{self.port}/{self.service_name} con usuario {self.username}")
                 dsn = cx_Oracle.makedsn(
                     self.host,
                     self.port,
@@ -87,73 +91,83 @@ class OracleConnection:
                 
                 # Solo reportar la conexión exitosa la primera vez
                 if not self._connection_reported:
-                    print("Conexión establecida exitosamente")
+                    print("DEBUG: Conexión establecida exitosamente")
                     self._connection_reported = True
                 
                 self.connection_attempts = 0  # Resetear intentos si hay éxito
                 self._last_ping_time = datetime.now()  # Actualizar tiempo del último ping
+                print("DEBUG: Conexión establecida y validada")
                 
                 # Precargar consultas comunes después de establecer conexión exitosa
                 self._prefetch_common_queries()
+            else:
+                print("DEBUG: Usando conexión existente")
+                
             return self.connection
         except cx_Oracle.Error as error:
-            print(f"Error al conectar a Oracle: {error}")
+            print(f"DEBUG: Error al conectar a Oracle: {error}")
             return None
 
     def execute_query(self, query: str, params: Union[tuple, dict] = None, cache_key: str = None, retry_count: int = 1) -> Optional[list]:
         """
-        Ejecuta una consulta SQL con caché opcional.
+        Ejecuta una consulta SQL y devuelve los resultados.
         
         Args:
             query: Consulta SQL a ejecutar
-            params: Parámetros para la consulta (opcional), puede ser tupla o diccionario
-            cache_key: Clave para almacenar en caché (opcional)
-            retry_count: Número de reintentos en caso de error
-        
+            params: Parámetros para la consulta (opcional)
+            cache_key: Clave para almacenar en caché los resultados (opcional)
+            retry_count: Número de intentos de reconexión en caso de error
+            
         Returns:
-            Lista de resultados o None si hay error
+            Lista de resultados o None si hay un error
         """
-        # Generar clave de caché basada en la consulta y parámetros si no se proporciona
-        if not cache_key and query:
-            cache_key = f"{query}_{str(params)}"
-            
-        # Verificar caché si existe una clave
-        if cache_key and cache_key in self._cache:
-            cache_time = self._cache_timestamp.get(cache_key)
-            if cache_time and datetime.now() - cache_time < self.CACHE_DURATION:
+        # Si hay una clave de caché y los resultados están en caché y no han expirado, devolverlos
+        if cache_key and cache_key in self._cache and cache_key in self._cache_timestamp:
+            if datetime.now() - self._cache_timestamp[cache_key] < self.CACHE_DURATION:
+                print(f"DEBUG: Usando resultados en caché para la clave '{cache_key}'")
                 return self._cache[cache_key]
-
-        try:
-            connection = self.connect()
-            if not connection:
+        
+        # Verificar si hay conexión, si no, intentar conectar
+        if not self.is_connected():
+            print("DEBUG: No hay conexión activa, intentando conectar...")
+            if not self.connect():
+                print("DEBUG: No se pudo establecer conexión a la base de datos")
                 return None
-
-            cursor = connection.cursor()
+        
+        try:
+            print(f"DEBUG: Ejecutando consulta: {query[:100]}...")
             if params:
-                cursor.execute(query, params)
-            else:
-                cursor.execute(query)
-
-            results = cursor.fetchall()
+                print(f"DEBUG: Con parámetros: {params}")
             
-            # Almacenar en caché siempre que tengamos una clave
+            cursor = self.connection.cursor()
+            cursor.execute(query, params or {})
+            results = cursor.fetchall()
+            cursor.close()
+            
+            print(f"DEBUG: Consulta ejecutada con éxito. Filas obtenidas: {len(results)}")
+            
+            # Si hay una clave de caché, almacenar los resultados
             if cache_key:
                 self._cache[cache_key] = results
                 self._cache_timestamp[cache_key] = datetime.now()
-
+                print(f"DEBUG: Resultados almacenados en caché con la clave '{cache_key}'")
+            
             return results
-
-        except cx_Oracle.Error as error:
-            print(f"Error al ejecutar la consulta: {error}")
-            # Reintentar la consulta si es posible
+            
+        except cx_Oracle.Error as e:
+            print(f"DEBUG: Error al ejecutar consulta: {str(e)}")
+            
+            # Si es un error de conexión y hay intentos restantes, intentar reconectar
             if retry_count > 0:
-                time.sleep(1)  # Esperar antes de reintentar
-                self._connection_reported = False  # Permitir reporte de reconexión
-                return self.execute_query(query, params, cache_key, retry_count - 1)
+                print(f"DEBUG: Intentando reconectar ({retry_count} intentos restantes)...")
+                time.sleep(1)  # Esperar un segundo antes de reintentar
+                self.connection = None  # Forzar reconexión
+                if self.connect():
+                    print("DEBUG: Reconexión exitosa, reintentando consulta...")
+                    return self.execute_query(query, params, cache_key, retry_count - 1)
+            
+            print("DEBUG: No se pudo ejecutar la consulta después de los reintentos")
             return None
-        finally:
-            if 'cursor' in locals() and cursor:
-                cursor.close()
 
     def _prefetch_common_queries(self):
         """Precarga consultas comunes en el caché durante la inicialización."""
