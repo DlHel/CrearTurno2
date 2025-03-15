@@ -2,7 +2,7 @@ from typing import Optional, List, Tuple, Dict, Any
 from datetime import time
 import cx_Oracle
 from .oracle_connection import OracleConnection
-from src.models.turno import Turno, TurnoDetalleDiario
+from models.turno import Turno, TurnoDetalleDiario
 
 class TurnoDAOError(Exception):
     """Excepción base para errores del DAO."""
@@ -94,88 +94,38 @@ class TurnoDAO:
         Compara la jornada completa, incluyendo los mismos días con horarios y duraciones similares.
         
         La búsqueda incluye varios niveles de coincidencia:
-        1. Coincidencia exacta (mismos días, horas y duraciones)
-        2. Coincidencia cercana (mismos días, horas similares)
-        3. Coincidencia en estructura (misma cantidad de días, misma distribución)
-        4. Coincidencia por ID en el nombre (si el nombre contiene un ID como '77-44')
+        1. Coincidencia exacta por ID (si el turno tiene un ID que ya existe en la BD)
+        2. Coincidencia exacta (mismos días, horas y duraciones exactamente iguales)
+        3. Coincidencia cercana (mismos días, horas similares)
         
         Args:
             turno: El turno a comparar
             
         Returns:
             Lista de tuplas (id_turno, nombre, detalles) de turnos similares
-            
-        Raises:
-            ConsultaError: Si hay un error al ejecutar la consulta
         """
         try:
             self._verificar_conexion()
             
             if not turno.detalles:
                 return []
-
-            # Buscar primero por ID en el nombre, si existe
-            turnos_coincidentes_por_id = []
-            try:
-                # Extraer posible ID del nombre
-                id_buscado = None
-                nombre_partes = turno.nombre.split('-')
-                if len(nombre_partes) > 0 and nombre_partes[0].isdigit():
-                    id_buscado = int(nombre_partes[0])
-                
-                if id_buscado:
-                    query_id = """
-                    SELECT t.ID_TURNO, t.NOMBRE, t.VIGENCIA, t.FRECUENCIA,
-                           tdd.ID_TURNO_DETALLE_DIARIO, tdd.JORNADA, tdd.HORA_INGRESO, tdd.DURACION
-                    FROM ASISTENCIAS.TURNO t
-                    JOIN ASISTENCIAS.TURNO_DETALLE_DIARIO tdd ON t.ID_TURNO = tdd.ID_TURNO
-                    WHERE t.ID_TURNO = :id_buscado
-                    ORDER BY tdd.JORNADA
-                    """
-                    results_id = self.db.execute_query(query_id, {"id_buscado": id_buscado})
-                    
-                    if results_id:
-                        turnos_agrupados = self._agrupar_resultados_turnos(results_id)
-                        turnos_coincidentes_por_id = [(
-                            id_turno,
-                            info['nombre'],
-                            self._convertir_detalles_para_comparacion(info['detalles'])
-                        ) for id_turno, info in turnos_agrupados.items()]
             
-            except Exception as e:
-                print(f"Error al buscar por ID: {str(e)}")
-            
-            # Construir lista de días y sus horarios para comparar
-            dias_turno = sorted([detalle.jornada for detalle in turno.detalles])
-            
-            # Consulta principal para buscar turnos con días similares
-            placeholders = ', '.join([f":dia{i}" for i in range(len(dias_turno))])
-            query = f"""
+            # Obtener todos los turnos de la base de datos
+            query_todos_turnos = """
             SELECT t.ID_TURNO, t.NOMBRE, t.VIGENCIA, t.FRECUENCIA,
                    tdd.ID_TURNO_DETALLE_DIARIO, tdd.JORNADA, tdd.HORA_INGRESO, tdd.DURACION
             FROM ASISTENCIAS.TURNO t
             JOIN ASISTENCIAS.TURNO_DETALLE_DIARIO tdd ON t.ID_TURNO = tdd.ID_TURNO
-            WHERE t.ID_TURNO IN (
-                SELECT t.ID_TURNO 
-                FROM ASISTENCIAS.TURNO t
-                JOIN ASISTENCIAS.TURNO_DETALLE_DIARIO tdd ON t.ID_TURNO = tdd.ID_TURNO
-                WHERE tdd.JORNADA IN ({placeholders})
-                GROUP BY t.ID_TURNO
-                HAVING COUNT(DISTINCT tdd.JORNADA) = :total_dias
-            )
             ORDER BY t.ID_TURNO, tdd.JORNADA
             """
             
-            params = {f"dia{i}": dia for i, dia in enumerate(dias_turno)}
-            params["total_dias"] = len(dias_turno)
+            results_todos_turnos = self.db.execute_query(query_todos_turnos)
             
-            results = self.db.execute_query(query, params)
-            
-            if not results:
-                return turnos_coincidentes_por_id
+            if not results_todos_turnos:
+                return []
             
             # Agrupar resultados por turno
-            turnos_agrupados = self._agrupar_resultados_turnos(results)
+            turnos_agrupados = self._agrupar_resultados_turnos(results_todos_turnos)
             
             # Convertir a lista de tuplas (id, nombre, detalles)
             turnos_para_comparar = [(
@@ -184,30 +134,41 @@ class TurnoDAO:
                 self._convertir_detalles_para_comparacion(info['detalles'])
             ) for id_turno, info in turnos_agrupados.items()]
             
-            # Filtrar por similitud exacta en días y horarios
+            # Filtrar por similitud exacta en días, horas y duraciones
             turnos_coincidentes = self._filtrar_turnos_similares(turno, turnos_para_comparar)
             
-            # Combinar con coincidencias por ID y eliminar duplicados
-            todas_coincidencias = turnos_coincidentes + [t for t in turnos_coincidentes_por_id if t not in turnos_coincidentes]
+            # Ordenar por ID para priorizar coincidencias con el mismo ID
+            turnos_coincidentes.sort(key=lambda x: 0 if x[0] == turno.id_turno else 1)
             
-            return todas_coincidencias
+            return turnos_coincidentes
             
-        except cx_Oracle.Error as e:
-            raise ConsultaError(f"Error al buscar turnos similares: {str(e)}")
+        except Exception as e:
+            print(f"Error al buscar turnos similares: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return []
 
-    def _agrupar_resultados_turnos(self, results: List[Tuple]) -> Dict[int, Dict[str, Any]]:
+    def _agrupar_resultados_turnos(self, results):
         """
-        Agrupa los resultados de una consulta por ID de turno.
+        Agrupa los resultados de la consulta por turno.
         
         Args:
             results: Resultados de la consulta
             
         Returns:
-            Diccionario de turnos agrupados por ID
+            Diccionario con los turnos agrupados
         """
         turnos_agrupados = {}
+        
         for row in results:
-            id_turno, nombre, vigencia, frecuencia, id_detalle, jornada, hora_ingreso, duracion = row
+            id_turno = row[0]
+            nombre = row[1]
+            vigencia = row[2]
+            frecuencia = row[3]
+            id_detalle = row[4]
+            jornada = row[5]
+            hora_ingreso = row[6]
+            duracion = row[7]
             
             if id_turno not in turnos_agrupados:
                 turnos_agrupados[id_turno] = {
@@ -217,57 +178,52 @@ class TurnoDAO:
                     'detalles': []
                 }
             
-            # Convertir la hora Oracle a objeto time de Python
-            hora = time(
-                hour=hora_ingreso.hour if hasattr(hora_ingreso, 'hour') else hora_ingreso.hour(),
-                minute=hora_ingreso.minute if hasattr(hora_ingreso, 'minute') else hora_ingreso.minute()
-            )
-            
             turnos_agrupados[id_turno]['detalles'].append({
                 'id_turno_detalle_diario': id_detalle,
                 'jornada': jornada,
-                'hora_ingreso': hora,
+                'hora_ingreso': hora_ingreso,
                 'duracion': duracion
             })
         
         return turnos_agrupados
 
-    def _convertir_detalles_para_comparacion(self, detalles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _convertir_detalles_para_comparacion(self, detalles):
         """
-        Convierte los detalles a un formato adecuado para comparación.
+        Convierte los detalles a un formato adecuado para la comparación.
         
         Args:
-            detalles: Lista de detalles
+            detalles: Lista de detalles del turno
             
         Returns:
-            Lista de detalles formateados para comparación
+            Lista de detalles convertidos
         """
-        detalles_formateados = []
+        detalles_convertidos = []
         
         for detalle in detalles:
-            # Calcular hora de salida
             hora_ingreso = detalle['hora_ingreso']
             duracion = detalle['duracion']
             
+            # Calcular hora de salida a partir de la duración en minutos
             minutos_totales = hora_ingreso.hour * 60 + hora_ingreso.minute + duracion
             horas_salida = minutos_totales // 60
             minutos_salida = minutos_totales % 60
             hora_salida = time(hour=horas_salida % 24, minute=minutos_salida)
             
-            detalles_formateados.append({
+            detalles_convertidos.append({
                 'jornada': detalle['jornada'],
                 'hora_ingreso': hora_ingreso,
                 'hora_salida': hora_salida,
                 'duracion': duracion
             })
         
-        # Ordenar por jornada para facilitar la comparación
+        # Ordenar por jornada
         dias_semana = {
             "Lunes": 1, "Martes": 2, "Miércoles": 3, 
             "Jueves": 4, "Viernes": 5, "Sábado": 6, "Domingo": 7
         }
+        detalles_convertidos = sorted(detalles_convertidos, key=lambda x: dias_semana.get(x['jornada'], 99))
         
-        return sorted(detalles_formateados, key=lambda x: dias_semana.get(x['jornada'], 99))
+        return detalles_convertidos
 
     def _filtrar_turnos_similares(self, turno: Turno, turnos_para_comparar: List[Tuple[int, str, List[dict]]]) -> List[Tuple[int, str, List[dict]]]:
         """
@@ -283,10 +239,20 @@ class TurnoDAO:
         # Preparar los detalles del turno a comparar
         detalles_turno = []
         for detalle in turno.detalles:
+            # Calcular hora de salida si no está definida
+            hora_salida = None
+            if hasattr(detalle, 'hora_salida') and detalle.hora_salida:
+                hora_salida = detalle.hora_salida
+            else:
+                minutos_totales = detalle.hora_ingreso.hour * 60 + detalle.hora_ingreso.minute + detalle.duracion
+                horas_salida = minutos_totales // 60
+                minutos_salida = minutos_totales % 60
+                hora_salida = time(hour=horas_salida % 24, minute=minutos_salida)
+                
             detalles_turno.append({
                 'jornada': detalle.jornada,
                 'hora_ingreso': detalle.hora_ingreso,
-                'hora_salida': detalle.hora_salida or time(0, 0),  # Valor por defecto si es None
+                'hora_salida': hora_salida,
                 'duracion': detalle.duracion
             })
         
@@ -297,47 +263,66 @@ class TurnoDAO:
         }
         detalles_turno = sorted(detalles_turno, key=lambda x: dias_semana.get(x['jornada'], 99))
         
-        turnos_coincidentes = []
+        # Resultados para cada nivel de coincidencia
+        coincidencias_exactas = []
+        coincidencias_cercanas = []
+        
+        # Crear un conjunto con los días del turno a comparar
+        dias_turno = {detalle['jornada'] for detalle in detalles_turno}
         
         for id_turno, nombre, detalles in turnos_para_comparar:
-            # Si el número de detalles es diferente, no hay coincidencia exacta
-            if len(detalles) != len(detalles_turno):
+            # Crear un conjunto con los días del turno candidato
+            dias_candidato = {detalle['jornada'] for detalle in detalles}
+            
+            # Si los conjuntos de días son diferentes, no hay coincidencia
+            if dias_turno != dias_candidato:
                 continue
             
-            es_coincidencia = True
+            # Verificar coincidencia exacta o cercana
+            es_coincidencia_exacta = True
+            es_coincidencia_cercana = True
             
-            # Comparar cada día con su correspondiente
-            for i, detalle_original in enumerate(detalles_turno):
-                if i >= len(detalles):  # Protección contra índices fuera de rango
-                    es_coincidencia = False
-                    break
-                    
-                detalle_comparar = detalles[i]
+            # Crear diccionarios para facilitar la comparación por día
+            detalles_turno_dict = {detalle['jornada']: detalle for detalle in detalles_turno}
+            detalles_candidato_dict = {detalle['jornada']: detalle for detalle in detalles}
+            
+            # Comparar cada día
+            for dia in dias_turno:
+                detalle_original = detalles_turno_dict[dia]
+                detalle_comparar = detalles_candidato_dict[dia]
                 
-                # Verificar si el día es el mismo
-                if detalle_original['jornada'] != detalle_comparar['jornada']:
-                    es_coincidencia = False
-                    break
-                
-                # Verificar si las horas y duraciones son similares
-                # Convertimos a minutos para comparar con una tolerancia
+                # Convertimos a minutos para comparar
                 minutos_ingreso_orig = detalle_original['hora_ingreso'].hour * 60 + detalle_original['hora_ingreso'].minute
                 minutos_ingreso_comp = detalle_comparar['hora_ingreso'].hour * 60 + detalle_comparar['hora_ingreso'].minute
                 
-                # Permitir diferencia de 5 minutos para considerar similar
-                if abs(minutos_ingreso_orig - minutos_ingreso_comp) > 5:
-                    es_coincidencia = False
-                    break
+                # Para coincidencia exacta, las horas deben ser idénticas
+                if minutos_ingreso_orig != minutos_ingreso_comp:
+                    es_coincidencia_exacta = False
                 
-                # Verificar si la duración es similar (tolerancia de 10 minutos)
+                # Para coincidencia cercana, permitir diferencia de 5 minutos
+                if abs(minutos_ingreso_orig - minutos_ingreso_comp) > 5:
+                    es_coincidencia_cercana = False
+                
+                # Para coincidencia exacta, la duración debe ser idéntica
+                if detalle_original['duracion'] != detalle_comparar['duracion']:
+                    es_coincidencia_exacta = False
+                
+                # Para coincidencia cercana, permitir diferencia de 10 minutos en duración
                 if abs(detalle_original['duracion'] - detalle_comparar['duracion']) > 10:
-                    es_coincidencia = False
-                    break
+                    es_coincidencia_cercana = False
             
-            if es_coincidencia:
-                turnos_coincidentes.append((id_turno, nombre, detalles))
+            # Si es coincidencia exacta y además tiene el mismo ID, es una prioridad máxima
+            if es_coincidencia_exacta and id_turno == turno.id_turno:
+                # Poner al principio de la lista
+                return [(id_turno, nombre, detalles)] + coincidencias_exactas + coincidencias_cercanas
+            
+            if es_coincidencia_exacta:
+                coincidencias_exactas.append((id_turno, nombre, detalles))
+            elif es_coincidencia_cercana:
+                coincidencias_cercanas.append((id_turno, nombre, detalles))
         
-        return turnos_coincidentes
+        # Priorizar coincidencias exactas sobre cercanas
+        return coincidencias_exactas + coincidencias_cercanas
 
     def asignar_ids(self, turno: Turno) -> None:
         """
@@ -564,42 +549,76 @@ class TurnoDAO:
         Genera un script SQL para insertar o actualizar un turno y sus detalles.
         
         Args:
-            turno: El turno para el que generar el script
+            turno: El turno a insertar o actualizar.
             
         Returns:
-            String con el script SQL
+            str: El script SQL generado.
         """
         try:
-            script = ""
+            script = []
             
-            # Asegurar que el turno tenga un ID válido
-            if turno.id_turno <= 0:
-                turno.id_turno = self.obtener_ultimo_id_turno()
+            # Verificar si el turno ya existe en la base de datos
+            turno_existe = False
+            if turno.id_turno > 0:
+                query = """
+                SELECT COUNT(*) FROM ASISTENCIAS.TURNO 
+                WHERE ID_TURNO = :id_turno
+                """
+                result = self.db.execute_query(query, {"id_turno": turno.id_turno})
+                count = result[0][0] if result else 0
+                turno_existe = count > 0
             
-            # Asegurar que los detalles tengan IDs válidos y correlativos
-            if any(detalle.id_turno_detalle_diario <= 0 for detalle in turno.detalles):
-                id_detalle_base = self.obtener_ultimo_id_detalle()
-                for i, detalle in enumerate(turno.detalles):
-                    detalle.id_turno_detalle_diario = id_detalle_base + i
-                    detalle.id_turno = turno.id_turno
+            # Generar script para el turno principal
+            if turno_existe:
+                # Script para actualizar un turno existente
+                script.append(f"-- Actualización del turno existente con ID {turno.id_turno}")
+                script.append(f"""
+UPDATE ASISTENCIAS.TURNO
+SET NOMBRE = '{turno.nombre}',
+    VIGENCIA = '{turno.vigencia}',
+    FRECUENCIA = '{turno.frecuencia}'
+WHERE ID_TURNO = {turno.id_turno};
+""")
+            else:
+                # Script para insertar un nuevo turno
+                script.append(f"-- Inserción de un nuevo turno con ID {turno.id_turno}")
+                script.append(f"""
+INSERT INTO ASISTENCIAS.TURNO (ID_TURNO, NOMBRE, VIGENCIA, FRECUENCIA)
+VALUES ({turno.id_turno}, '{turno.nombre}', '{turno.vigencia}', '{turno.frecuencia}');
+""")
             
-            # INSERT/UPDATE para la tabla TURNO
-            script += f"-- Turno: {turno.nombre} (ID: {turno.id_turno})\n"
-            script += f"INSERT INTO ASISTENCIAS.TURNO (ID_TURNO, NOMBRE, VIGENCIA, FRECUENCIA) VALUES ({turno.id_turno}, '{turno.nombre}', '{turno.vigencia}', '{turno.frecuencia}');\n"
-            script += f"-- En caso de que ya exista, usar UPDATE:\n"
-            script += f"-- UPDATE ASISTENCIAS.TURNO SET NOMBRE = '{turno.nombre}', VIGENCIA = '{turno.vigencia}', FRECUENCIA = '{turno.frecuencia}' WHERE ID_TURNO = {turno.id_turno};\n\n"
+            # Verificar si existen detalles para este turno
+            detalles_existentes = {}
+            if turno_existe:
+                query = """
+                SELECT ID_TURNO_DETALLE_DIARIO, JORNADA
+                FROM ASISTENCIAS.TURNO_DETALLE_DIARIO
+                WHERE ID_TURNO = :id_turno
+                """
+                result = self.db.execute_query(query, {"id_turno": turno.id_turno})
+                if result:
+                    detalles_existentes = {row[0]: row[1] for row in result}
+                
+                if detalles_existentes:
+                    script.append(f"\n-- Eliminación de detalles existentes para el turno {turno.id_turno}")
+                    script.append(f"""
+DELETE FROM ASISTENCIAS.TURNO_DETALLE_DIARIO
+WHERE ID_TURNO = {turno.id_turno};
+""")
             
-            # INSERTs para los detalles
-            script += f"-- Detalles del turno {turno.id_turno}:\n"
-            script += f"-- Si es una actualización, primero eliminar los detalles existentes:\n"
-            script += f"-- DELETE FROM ASISTENCIAS.TURNO_DETALLE_DIARIO WHERE ID_TURNO = {turno.id_turno};\n\n"
+            # Generar script para los detalles del turno
+            if turno.detalles:
+                script.append(f"\n-- Inserción de detalles para el turno {turno.id_turno}")
+                for detalle in turno.detalles:
+                    hora_ingreso_str = detalle.hora_ingreso.strftime("%H:%M:%S")
+                    script.append(f"""
+INSERT INTO ASISTENCIAS.TURNO_DETALLE_DIARIO (ID_TURNO_DETALLE_DIARIO, ID_TURNO, JORNADA, HORA_INGRESO, DURACION)
+VALUES ({detalle.id_turno_detalle_diario}, {detalle.id_turno}, '{detalle.jornada}', TO_DATE('2025-01-01 {hora_ingreso_str}', 'YYYY-MM-DD HH24:MI:SS'), {detalle.duracion});
+""")
             
-            for detalle in turno.detalles:
-                script += f"INSERT INTO ASISTENCIAS.TURNO_DETALLE_DIARIO (ID_TURNO_DETALLE_DIARIO, ID_TURNO, JORNADA, HORA_INGRESO, DURACION) VALUES ({detalle.id_turno_detalle_diario}, {turno.id_turno}, '{detalle.jornada}', TO_DATE('2025-01-01 {detalle.hora_ingreso.strftime('%H:%M')}:00', 'YYYY-MM-DD HH24:MI:SS'), {detalle.duracion});\n"
-            
-            return script
+            return "\n".join(script)
         except Exception as e:
-            print(f"Error al generar script SQL en TurnoDAO: {str(e)}")
+            print(f"Error al generar script SQL: {str(e)}")
             import traceback
             traceback.print_exc()
-            return None 
+            return f"-- Error al generar script SQL: {str(e)}" 

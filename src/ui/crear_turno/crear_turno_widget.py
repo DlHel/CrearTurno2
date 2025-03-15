@@ -1,19 +1,19 @@
+import sys
+import os
+from datetime import datetime, time
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-    QPushButton, QComboBox, QTimeEdit, QLineEdit,
-    QTableWidget, QTableWidgetItem, QMessageBox,
-    QFileDialog, QGroupBox, QCheckBox, QFrame,
-    QDialog, QTextEdit, QDialogButtonBox, QHeaderView,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
+    QComboBox, QTimeEdit, QPushButton, QTableWidget, QTableWidgetItem,
+    QHeaderView, QMessageBox, QCheckBox, QGroupBox, QRadioButton,
+    QTextEdit, QFileDialog, QDialog, QDialogButtonBox, QFrame,
     QListWidget, QFormLayout, QSpacerItem, QSizePolicy,
     QSplitter, QListWidgetItem, QSpinBox, QGridLayout
 )
-from PyQt6.QtGui import QFont, QKeyEvent, QIntValidator, QColor, QIcon, QSyntaxHighlighter, QTextCharFormat
-from PyQt6.QtCore import Qt, QTime, pyqtSignal, QTimer, QRegularExpression
-from datetime import datetime, time, timedelta
-import sys
-sys.path.append('src')
-from src.models.turno import Turno, TurnoDetalleDiario
-from src.database.turno_dao import TurnoDAO
+from PyQt6.QtCore import Qt, QTime, QDate, QTimer, pyqtSignal, QRegularExpression
+from PyQt6.QtGui import QFont, QColor, QKeyEvent, QIntValidator, QIcon, QSyntaxHighlighter, QTextCharFormat
+
+from models.turno import Turno, TurnoDetalleDiario
+from database.turno_dao import TurnoDAO
 
 class TimeEditMejorado(QTimeEdit):
     """Control de tiempo mejorado que facilita la entrada de horas."""
@@ -1726,14 +1726,35 @@ class CrearTurnoWidget(QWidget):
                 # Continuar con el proceso a pesar del error
             
             # Verificar duplicados
+            print("Buscando turnos similares...")
             turnos_similares = self.turno_dao.buscar_turnos_similares(self.turno_actual)
             
             if turnos_similares:
-                # Mostrar aviso de duplicidad
-                msg = f"Se encontraron {len(turnos_similares)} turnos similares o idénticos:\n\n"
+                print(f"Se encontraron {len(turnos_similares)} turnos similares:")
+                for idx, (id_turno, nombre, detalles) in enumerate(turnos_similares):
+                    print(f"Turno similar #{idx+1}: ID={id_turno}, Nombre={nombre}")
+                    print(f"  Detalles: {len(detalles)} días")
+                    for detalle in detalles:
+                        print(f"    {detalle['jornada']}: {detalle['hora_ingreso']} - Duración: {detalle['duracion']} min")
+                
+                # Determinar si hay coincidencia exacta por ID
+                coincidencia_exacta_id = any(id_turno == self.turno_actual.id_turno for id_turno, _, _ in turnos_similares)
+                
+                # Preparar el mensaje según el tipo de coincidencia
+                if coincidencia_exacta_id:
+                    titulo = "¡ATENCIÓN! Turno ya existe en la base de datos"
+                    msg = f"El turno con ID {self.turno_actual.id_turno} ya existe en la base de datos:\n\n"
+                else:
+                    titulo = "Turnos Similares Encontrados"
+                    msg = f"Se encontraron {len(turnos_similares)} turnos similares o idénticos:\n\n"
                 
                 for id_turno, nombre, detalles in turnos_similares[:3]:  # Mostrar solo los primeros 3
-                    msg += f"• Turno ID: {id_turno}, Nombre: {nombre}\n"
+                    # Destacar si es coincidencia exacta por ID
+                    if id_turno == self.turno_actual.id_turno:
+                        msg += f"• ⚠️ TURNO EXISTENTE - ID: {id_turno}, Nombre: {nombre} ⚠️\n"
+                    else:
+                        msg += f"• Turno ID: {id_turno}, Nombre: {nombre}\n"
+                    
                     for detalle in detalles[:3]:  # Mostrar solo los primeros 3 detalles
                         jornada = detalle['jornada']
                         hora_ingreso = detalle['hora_ingreso'].strftime("%H:%M")
@@ -1745,18 +1766,30 @@ class CrearTurnoWidget(QWidget):
                 if len(turnos_similares) > 3:
                     msg += f"Y {len(turnos_similares) - 3} turnos más...\n\n"
                 
-                msg += "¿Desea continuar con la creación a pesar de la duplicidad?"
+                if coincidencia_exacta_id:
+                    msg += "Si continúa, se generará un script SQL para actualizar el turno existente.\n\n"
+                    msg += "¿Desea continuar y generar el script de actualización?"
+                else:
+                    msg += "¿Desea continuar con la creación a pesar de la duplicidad?"
+                
+                print(f"Mostrando mensaje de alerta: {titulo}")
+                print(f"Mensaje: {msg}")
                 
                 respuesta = QMessageBox.question(
                     self,
-                    "Turnos Similares Encontrados",
+                    titulo,
                     msg,
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                     QMessageBox.StandardButton.No
                 )
                 
+                print(f"Respuesta del usuario: {'Sí' if respuesta == QMessageBox.StandardButton.Yes else 'No'}")
+                
                 if respuesta == QMessageBox.StandardButton.No:
+                    print("Usuario canceló la operación debido a duplicidad")
                     return
+            else:
+                print("No se encontraron turnos similares")
             
             # Guardar turno en la base de datos
             print("Guardando turno en la base de datos")
