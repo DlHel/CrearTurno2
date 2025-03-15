@@ -1,0 +1,41 @@
+# Archivos de caché de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Archivos de distribución / empaquetado
+dist/
+build/
+*.egg-info/
+
+# Entornos virtuales
+venv/
+env/
+ENV/
+
+# Archivos de cobertura de pruebas
+.coverage
+htmlcov/
+
+# Archivos de registro
+logs/
+*.log
+
+# Archivos temporales
+*.tmp
+*.bak
+*.swp
+*~
+
+# Archivos específicos de IDE
+.idea/
+.vscode/
+*.sublime-*
+
+# Archivos de base de datos
+*.db
+*.sqlite3
+
+# Archivos de configuración local
+.env
+config.local.ini 

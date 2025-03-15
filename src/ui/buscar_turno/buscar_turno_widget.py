@@ -7,8 +7,8 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
 from datetime import datetime, time
 
-from models.turno import Turno, TurnoDetalleDiario
-from database.turno_dao import TurnoDAO, TurnoDAOError
+from src.models.turno import Turno, TurnoDetalleDiario
+from src.database.turno_dao import TurnoDAO, TurnoDAOError
 from .editar_turno_dialog import EditarTurnoDialog
 
 class BuscarTurnoWidget(QWidget):

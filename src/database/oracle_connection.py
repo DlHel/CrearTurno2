@@ -27,6 +27,10 @@ class OracleConnection:
             cls._instance._ping_interval = timedelta(minutes=5)  # Verificar ping cada 5 minutos
         return cls._instance
     
+    def is_connected(self) -> bool:
+        """Verifica si hay una conexión activa a la base de datos."""
+        return self.connection is not None and self._is_connection_valid()
+    
     def _initialize_cache(self):
         """Inicializa el caché con consultas comunes que se usan frecuentemente."""
         # Inicializar las estructuras de caché, pero no precargar consultas aún
@@ -200,6 +204,15 @@ class OracleConnection:
             if cache_time and datetime.now() - cache_time < self.CACHE_DURATION:
                 return self._cache[cache_key]
         return default
+
+    def get_connection(self) -> Optional[cx_Oracle.Connection]:
+        """
+        Obtiene la conexión actual a la base de datos, estableciéndola si no existe.
+        
+        Returns:
+            Objeto de conexión a Oracle o None si no se puede establecer
+        """
+        return self.connect()
 
     def __del__(self):
         """Destructor que asegura el cierre de la conexión."""

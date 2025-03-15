@@ -9,4 +9,10 @@ PyQt6-sip==13.6.0  # Bindings SIP para PyQt6
 # Utilidades
 python-dateutil==2.8.2  # Para manejo de fechas
 pandas==2.1.4  # Para manejo de datos
-numpy==1.26.2  # Dependencia de pandas y cálculos numéricos 
+numpy==1.26.2  # Dependencia de pandas y cálculos numéricos
+
+# Dependencias para pruebas
+pytest==7.4.3  # Framework de pruebas
+pytest-qt==4.2.0  # Soporte para pruebas de PyQt
+pytest-mock==3.12.0  # Para crear mocks en pruebas
+pytest-cov==4.1.0  # Para medir cobertura de código 
